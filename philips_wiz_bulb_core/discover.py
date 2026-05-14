@@ -9,7 +9,7 @@ import logging
 import socket
 from typing import Any
 
-from .bulb import DEFAULT_PORT, BulbClient
+from .bulb import DEFAULT_PORT, BulbClient, BulbError
 
 log = logging.getLogger(__name__)
 
@@ -42,8 +42,8 @@ async def _broadcast_collect(
         def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
             try:
                 received[addr[0]] = json.loads(data.decode())
-            except Exception:
-                pass
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                log.debug("dropping unparseable datagram from %s: %r", addr[0], exc)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -78,7 +78,8 @@ async def _sweep_subnet(
         async with sem:
             try:
                 raw_result = await client.get_pilot(ip)
-            except Exception:
+            except (BulbError, TimeoutError, OSError) as exc:
+                log.debug("sweep probe to %s failed: %r", ip, exc)
                 return
             # Unicast get_pilot returns just .result; wrap to reuse parser.
             try:
