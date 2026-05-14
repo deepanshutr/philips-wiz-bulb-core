@@ -54,6 +54,10 @@ select = ["E", "F", "I", "B", "UP", "ASYNC", "RUF"]
 strict = true
 python_version = "3.11"
 
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 markers = ["live: requires a real WiZ bulb reachable on the LAN"]

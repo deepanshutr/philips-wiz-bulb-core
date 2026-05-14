@@ -60,19 +60,20 @@ class BulbClient:
         for attempt in range(self.retries + 1):
             try:
                 resp = await self._send_once(ip, payload)
-                if "error" in resp:
-                    raise BulbError(
-                        f"wiz error {resp['error'].get('code')}: {resp['error'].get('message')}"
-                    )
-                return dict(resp.get("result", {}))
-            except (TimeoutError, OSError, BulbError) as exc:
+            except (TimeoutError, OSError) as exc:
                 last_err = exc
                 if attempt < self.retries:
                     log.debug("retrying %s after %r (attempt %d)", method, exc, attempt + 1)
                     await asyncio.sleep(backoff)
                     backoff *= 2
-        if isinstance(last_err, BulbError):
-            raise last_err
+                continue
+            if "error" in resp:
+                # WiZ-side protocol error — deterministic, retrying is wasted round-trips.
+                raise BulbError(
+                    f"wiz error {resp['error'].get('code')}: {resp['error'].get('message')}"
+                )
+            return dict(resp.get("result", {}))
+        log.warning("giving up on %s to %s after %d attempts", method, ip, self.retries + 1)
         raise BulbError(f"{method} to {ip}: {last_err!r}")
 
     async def _send_once(self, ip: str, payload: bytes) -> dict[str, Any]:
