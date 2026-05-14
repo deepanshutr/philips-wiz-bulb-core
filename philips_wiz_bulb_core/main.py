@@ -62,20 +62,26 @@ def build_app(settings: Settings | None = None) -> FastAPI:
             except Exception as e:
                 log.warning("background rediscover failed: %r", e)
 
-    @asynccontextmanager
-    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    async def _boot_discover() -> None:
         try:
             await run_discovery()
         except Exception as e:
             log.warning("boot discovery failed: %r", e)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # Fire boot discovery in the background so uvicorn binds the port
+        # immediately; /bulbs returns [] until the LAN sweep populates the
+        # registry (~30s on a /24). /health stays responsive throughout.
+        t_boot = asyncio.create_task(_boot_discover())
         t1 = asyncio.create_task(refresh_loop())
         t2 = asyncio.create_task(rediscover_loop())
         try:
             yield
         finally:
-            for t in (t1, t2):
+            for t in (t_boot, t1, t2):
                 t.cancel()
-            await asyncio.gather(t1, t2, return_exceptions=True)
+            await asyncio.gather(t_boot, t1, t2, return_exceptions=True)
 
     app = create_app(registry=registry, bulb=bulb, run_discovery=run_discovery)
     app.router.lifespan_context = lifespan
