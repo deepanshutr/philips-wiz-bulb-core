@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from philips_wiz_bulb_core.api import create_app
+from philips_wiz_bulb_core.bulb import BulbError
 from philips_wiz_bulb_core.registry import Registry
 
 
@@ -172,3 +173,32 @@ def test_discover_endpoint(client) -> None:
     body = r.json()
     assert body["discovered"] == 0
     assert body["total"] == 1
+
+
+def test_bulb_error_returns_504(tmp_path: Path) -> None:
+    """A BulbError from get_pilot or set_pilot surfaces as HTTP 504."""
+
+    class FailingClient(StubClient):
+        async def set_pilot(self, ip: str, **params: Any) -> dict:
+            raise BulbError("simulated UDP timeout")
+
+        async def get_pilot(self, ip: str) -> dict:
+            raise BulbError("simulated UDP timeout")
+
+    reg = Registry(tmp_path / "state.json")
+    reg.upsert_discovered({"mac": "d8a0118dc5c3", "ip": "192.168.1.3", "rssi": -63})
+
+    async def fake_discover() -> int:
+        return 0
+
+    app = create_app(registry=reg, bulb=FailingClient(), run_discovery=fake_discover)
+    c = TestClient(app)
+    r = c.post("/bulb/d8a0118dc5c3/on")
+    assert r.status_code == 504
+    assert "simulated UDP timeout" in r.json()["detail"]
+
+    r = c.get("/bulb/d8a0118dc5c3")
+    assert r.status_code == 504
+
+    r = c.get("/bulbs/default")
+    assert r.status_code == 504
